@@ -2,8 +2,13 @@ package com.example.ui.screens
 
 import android.content.Context
 import android.content.Intent
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -23,8 +28,11 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.material.icons.filled.AutoFixHigh
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.Clear
 import androidx.compose.material.icons.filled.CloudUpload
+import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.DocumentScanner
 import androidx.compose.material.icons.filled.Draw
 import androidx.compose.material.icons.filled.Edit
@@ -78,11 +86,13 @@ import com.example.ui.components.SignaturePadDialog
 import com.example.util.PdfEngine
 import com.example.viewmodel.PdfViewModel
 import java.io.File
+import kotlin.math.hypot
 
 enum class AnnotationMode {
     NONE,
     FREEHAND_PEN,
     HIGHLIGHTER,
+    ERASER,
     SIGNATURE
 }
 
@@ -101,6 +111,27 @@ fun ViewerScreen(
     var annotationMode by remember { mutableStateOf(AnnotationMode.NONE) }
     var showSignaturePad by remember { mutableStateOf(false) }
 
+    // Color palettes
+    var selectedPenColor by remember { mutableStateOf(Color(0xFFE53935)) } // Default Red
+    var selectedHighlighterColor by remember { mutableStateOf(Color(0xFFFFEB3B)) } // Default Yellow
+
+    val penColors = listOf(
+        Color(0xFFE53935) to "Red",
+        Color(0xFF1E88E5) to "Blue",
+        Color(0xFF1D1B20) to "Black",
+        Color(0xFF43A047) to "Green",
+        Color(0xFF8E24AA) to "Purple",
+        Color(0xFFFB8C00) to "Orange"
+    )
+
+    val highlighterColors = listOf(
+        Color(0xFFFFEB3B) to "Yellow",
+        Color(0xFF76FF03) to "Neon Green",
+        Color(0xFF00E5FF) to "Cyan",
+        Color(0xFFFF4081) to "Pink",
+        Color(0xFFFF9100) to "Orange"
+    )
+
     val pageAnnotations = remember { mutableStateMapOf<Int, PageAnnotations>() }
 
     val file = remember(filePath) { File(filePath) }
@@ -109,8 +140,34 @@ fun ViewerScreen(
 
     LaunchedEffect(filePath) {
         if (file.exists()) {
-            val rendered = PdfEngine.renderPdfPagesToBitmaps(context, file, scaleFactor = 2.0f)
-            pages = rendered
+            val ext = file.extension.lowercase()
+            if (ext in listOf("png", "jpg", "jpeg", "webp")) {
+                // If opening an image or set of images
+                val parentDir = file.parentFile
+                val basePrefix = file.nameWithoutExtension.substringBefore("_Page_")
+                val siblingImages = parentDir?.listFiles()?.filter { f ->
+                    f.isFile && f.extension.lowercase() in listOf("png", "jpg", "jpeg", "webp") &&
+                            (f.name == file.name || (basePrefix.length > 3 && f.name.startsWith(basePrefix)))
+                }?.sortedBy { it.name } ?: emptyList()
+
+                val imageFiles = if (siblingImages.isNotEmpty()) siblingImages else listOf(file)
+
+                pages = imageFiles.mapIndexed { idx, imgFile ->
+                    DocumentPage(
+                        id = "img_$idx",
+                        pageIndex = idx,
+                        bitmapPath = imgFile.absolutePath,
+                        textContent = "Page ${idx + 1}"
+                    )
+                }
+            } else {
+                try {
+                    val rendered = PdfEngine.renderPdfPagesToBitmaps(context, file, scaleFactor = 2.0f)
+                    pages = rendered
+                } catch (e: Exception) {
+                    e.printStackTrace()
+                }
+            }
         }
         isLoading = false
     }
@@ -126,7 +183,7 @@ fun ViewerScreen(
                             maxLines = 1
                         )
                         Text(
-                            text = if (pages.isNotEmpty()) "${pages.size} Page(s) • ${if (annotationMode != AnnotationMode.NONE) "Annotating" else "Viewer"}" else "PDF Document",
+                            text = if (pages.isNotEmpty()) "${pages.size} Page(s) • ${if (annotationMode != AnnotationMode.NONE) "Annotating" else "Viewer"}" else "Document Preview",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
@@ -184,71 +241,145 @@ fun ViewerScreen(
             if (pages.isNotEmpty()) {
                 Surface(
                     color = Color.White,
-                    shadowElevation = 8.dp,
+                    shadowElevation = 12.dp,
                     modifier = Modifier.fillMaxWidth()
                 ) {
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 12.dp, vertical = 8.dp),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                            // Pen Mode
-                            IconButton(
-                                onClick = {
-                                    annotationMode = if (annotationMode == AnnotationMode.FREEHAND_PEN) AnnotationMode.NONE else AnnotationMode.FREEHAND_PEN
-                                },
+                    Column(modifier = Modifier.fillMaxWidth()) {
+                        // Animated Color Picker Row when Pen or Highlighter is active
+                        AnimatedVisibility(
+                            visible = annotationMode == AnnotationMode.FREEHAND_PEN || annotationMode == AnnotationMode.HIGHLIGHTER,
+                            enter = expandVertically(),
+                            exit = shrinkVertically()
+                        ) {
+                            Row(
                                 modifier = Modifier
-                                    .background(
-                                        if (annotationMode == AnnotationMode.FREEHAND_PEN) Color(0xFFE8DEF8) else Color.Transparent,
-                                        CircleShape
-                                    )
-                                    .testTag("annotation_mode_pen")
+                                    .fillMaxWidth()
+                                    .background(Color(0xFFF3EDF7))
+                                    .padding(horizontal = 16.dp, vertical = 8.dp),
+                                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                                verticalAlignment = Alignment.CenterVertically
                             ) {
-                                Icon(Icons.Default.Edit, contentDescription = "Red Pen", tint = Color.Red)
-                            }
+                                Text(
+                                    text = if (annotationMode == AnnotationMode.FREEHAND_PEN) "Pen Ink:" else "Highlighter:",
+                                    style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
+                                    color = Color(0xFF1C1B1F)
+                                )
 
-                            // Highlighter Mode
-                            IconButton(
-                                onClick = {
-                                    annotationMode = if (annotationMode == AnnotationMode.HIGHLIGHTER) AnnotationMode.NONE else AnnotationMode.HIGHLIGHTER
-                                },
-                                modifier = Modifier
-                                    .background(
-                                        if (annotationMode == AnnotationMode.HIGHLIGHTER) Color(0xFFFFF9C4) else Color.Transparent,
-                                        CircleShape
-                                    )
-                                    .testTag("annotation_mode_highlighter")
-                            ) {
-                                Icon(Icons.Default.Highlight, contentDescription = "Yellow Highlighter", tint = Color(0xFFFBC02D))
-                            }
+                                val colorsToDisplay = if (annotationMode == AnnotationMode.FREEHAND_PEN) penColors else highlighterColors
+                                val activeColor = if (annotationMode == AnnotationMode.FREEHAND_PEN) selectedPenColor else selectedHighlighterColor
 
-                            // Signature Mode
-                            IconButton(
-                                onClick = { showSignaturePad = true },
-                                modifier = Modifier.testTag("annotation_mode_signature")
-                            ) {
-                                Icon(Icons.Default.Draw, contentDescription = "Electronic Signature", tint = Color(0xFF6750A4))
+                                colorsToDisplay.forEach { (color, label) ->
+                                    val isSelected = activeColor == color
+                                    Box(
+                                        modifier = Modifier
+                                            .size(28.dp)
+                                            .clip(CircleShape)
+                                            .background(color)
+                                            .border(
+                                                width = if (isSelected) 3.dp else 1.dp,
+                                                color = if (isSelected) Color(0xFF6750A4) else Color.LightGray,
+                                                shape = CircleShape
+                                            )
+                                            .clickable {
+                                                if (annotationMode == AnnotationMode.FREEHAND_PEN) {
+                                                    selectedPenColor = color
+                                                } else {
+                                                    selectedHighlighterColor = color
+                                                }
+                                            },
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        if (isSelected) {
+                                            Icon(
+                                                imageVector = Icons.Default.Check,
+                                                contentDescription = label,
+                                                tint = if (color == Color(0xFFFFEB3B) || color == Color(0xFF76FF03)) Color.Black else Color.White,
+                                                modifier = Modifier.size(14.dp)
+                                            )
+                                        }
+                                    }
+                                }
                             }
                         }
 
-                        if (pageAnnotations.isNotEmpty() && viewModel != null) {
-                            Button(
-                                onClick = {
-                                    viewModel.saveAnnotatedDocument(file, pageAnnotations.toMap())
-                                },
-                                colors = ButtonDefaults.buttonColors(
-                                    containerColor = Color(0xFF6750A4),
-                                    contentColor = Color.White
-                                ),
-                                shape = RoundedCornerShape(12.dp),
-                                modifier = Modifier.testTag("save_annotated_pdf_button")
-                            ) {
-                                Icon(Icons.Default.Check, contentDescription = null, modifier = Modifier.size(16.dp))
-                                Spacer(modifier = Modifier.width(6.dp))
-                                Text("Save Annotations")
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 12.dp, vertical = 8.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                // Pen Mode
+                                IconButton(
+                                    onClick = {
+                                        annotationMode = if (annotationMode == AnnotationMode.FREEHAND_PEN) AnnotationMode.NONE else AnnotationMode.FREEHAND_PEN
+                                    },
+                                    modifier = Modifier
+                                        .background(
+                                            if (annotationMode == AnnotationMode.FREEHAND_PEN) Color(0xFFE8DEF8) else Color.Transparent,
+                                            CircleShape
+                                        )
+                                        .testTag("annotation_mode_pen")
+                                ) {
+                                    Icon(Icons.Default.Edit, contentDescription = "Pen Tool", tint = selectedPenColor)
+                                }
+
+                                // Highlighter Mode
+                                IconButton(
+                                    onClick = {
+                                        annotationMode = if (annotationMode == AnnotationMode.HIGHLIGHTER) AnnotationMode.NONE else AnnotationMode.HIGHLIGHTER
+                                    },
+                                    modifier = Modifier
+                                        .background(
+                                            if (annotationMode == AnnotationMode.HIGHLIGHTER) Color(0xFFFFF9C4) else Color.Transparent,
+                                            CircleShape
+                                        )
+                                        .testTag("annotation_mode_highlighter")
+                                ) {
+                                    Icon(Icons.Default.Highlight, contentDescription = "Highlighter Tool", tint = selectedHighlighterColor)
+                                }
+
+                                // Eraser Mode
+                                IconButton(
+                                    onClick = {
+                                        annotationMode = if (annotationMode == AnnotationMode.ERASER) AnnotationMode.NONE else AnnotationMode.ERASER
+                                    },
+                                    modifier = Modifier
+                                        .background(
+                                            if (annotationMode == AnnotationMode.ERASER) Color(0xFFFFD8E4) else Color.Transparent,
+                                            CircleShape
+                                        )
+                                        .testTag("annotation_mode_eraser")
+                                ) {
+                                    Icon(Icons.Default.AutoFixHigh, contentDescription = "Eraser Tool", tint = Color(0xFFB3261E))
+                                }
+
+                                // Signature Mode
+                                IconButton(
+                                    onClick = { showSignaturePad = true },
+                                    modifier = Modifier.testTag("annotation_mode_signature")
+                                ) {
+                                    Icon(Icons.Default.Draw, contentDescription = "Electronic Signature", tint = Color(0xFF6750A4))
+                                }
+                            }
+
+                            if (pageAnnotations.isNotEmpty() && viewModel != null) {
+                                Button(
+                                    onClick = {
+                                        viewModel.saveAnnotatedDocument(file, pageAnnotations.toMap())
+                                    },
+                                    colors = ButtonDefaults.buttonColors(
+                                        containerColor = Color(0xFF6750A4),
+                                        contentColor = Color.White
+                                    ),
+                                    shape = RoundedCornerShape(12.dp),
+                                    modifier = Modifier.testTag("save_annotated_pdf_button")
+                                ) {
+                                    Icon(Icons.Default.Check, contentDescription = null, modifier = Modifier.size(16.dp))
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                    Text("Save Annotations")
+                                }
                             }
                         }
                     }
@@ -266,7 +397,7 @@ fun ViewerScreen(
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
                     CircularProgressIndicator()
                     Spacer(modifier = Modifier.height(12.dp))
-                    Text("Rendering PDF Pages...")
+                    Text("Rendering Pages...")
                 }
             }
         } else if (pages.isEmpty()) {
@@ -284,7 +415,7 @@ fun ViewerScreen(
                         tint = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                     Spacer(modifier = Modifier.height(12.dp))
-                    Text("Document exported successfully to:")
+                    Text("Document saved cleanly to:")
                     Text(
                         text = file.absolutePath,
                         style = MaterialTheme.typography.bodySmall,
@@ -337,14 +468,20 @@ fun ViewerScreen(
                                         style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold)
                                     )
 
-                                    Row {
-                                        // Quick Stamps
-                                        Text(
-                                            text = "+ Stamp: APPROVED",
-                                            style = MaterialTheme.typography.labelSmall,
-                                            color = Color(0xFF006A6A),
-                                            modifier = Modifier.padding(horizontal = 4.dp)
-                                        )
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        if (activePageAnno.paths.isNotEmpty() || activePageAnno.stamps.isNotEmpty()) {
+                                            Text(
+                                                text = "Clear Page",
+                                                style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
+                                                color = Color(0xFFB3261E),
+                                                modifier = Modifier
+                                                    .clip(RoundedCornerShape(6.dp))
+                                                    .clickable {
+                                                        pageAnnotations.remove(index)
+                                                    }
+                                                    .padding(horizontal = 6.dp, vertical = 2.dp)
+                                            )
+                                        }
                                     }
                                 }
                             }
@@ -358,41 +495,59 @@ fun ViewerScreen(
                                         contentScale = ContentScale.FillWidth
                                     )
 
-                                    // Canvas Overlay for Freehand Drawing & Annotations
+                                    // Canvas Overlay for Freehand Drawing, Highlighting, and Eraser
                                     Box(
                                         modifier = Modifier
                                             .matchParentSize()
                                             .then(
                                                 if (annotationMode != AnnotationMode.NONE) {
-                                                    Modifier.pointerInput(annotationMode) {
+                                                    Modifier.pointerInput(annotationMode, selectedPenColor, selectedHighlighterColor) {
                                                         detectDragGestures(
                                                             onDragStart = { offset ->
-                                                                val isHigh = annotationMode == AnnotationMode.HIGHLIGHTER
-                                                                val color = if (isHigh) Color.Yellow else Color.Red
-                                                                val stroke = if (isHigh) 28f else 6f
+                                                                if (annotationMode == AnnotationMode.ERASER) {
+                                                                    // Erase any path near offset
+                                                                    val current = pageAnnotations[index] ?: PageAnnotations(index)
+                                                                    val filteredPaths = current.paths.filterNot { pathData ->
+                                                                        pathData.points.any { pt -> hypot(pt.x - offset.x, pt.y - offset.y) < 40f }
+                                                                    }
+                                                                    val filteredStamps = current.stamps.filterNot { _ -> false }
+                                                                    pageAnnotations[index] = current.copy(paths = filteredPaths, stamps = filteredStamps)
+                                                                } else {
+                                                                    val isHigh = annotationMode == AnnotationMode.HIGHLIGHTER
+                                                                    val color = if (isHigh) selectedHighlighterColor else selectedPenColor
+                                                                    val stroke = if (isHigh) 28f else 6f
 
-                                                                val newPath = DrawingPath(
-                                                                    points = listOf(offset),
-                                                                    color = color,
-                                                                    strokeWidth = stroke,
-                                                                    isHighlighter = isHigh
-                                                                )
-                                                                val current = pageAnnotations[index] ?: PageAnnotations(index)
-                                                                pageAnnotations[index] = current.copy(
-                                                                    paths = current.paths + newPath
-                                                                )
+                                                                    val newPath = DrawingPath(
+                                                                        points = listOf(offset),
+                                                                        color = color,
+                                                                        strokeWidth = stroke,
+                                                                        isHighlighter = isHigh
+                                                                    )
+                                                                    val current = pageAnnotations[index] ?: PageAnnotations(index)
+                                                                    pageAnnotations[index] = current.copy(
+                                                                        paths = current.paths + newPath
+                                                                    )
+                                                                }
                                                             },
                                                             onDrag = { change, _ ->
                                                                 change.consume()
                                                                 val current = pageAnnotations[index] ?: PageAnnotations(index)
-                                                                if (current.paths.isNotEmpty()) {
-                                                                    val lastPath = current.paths.last()
-                                                                    val updatedPath = lastPath.copy(
-                                                                        points = lastPath.points + change.position
-                                                                    )
-                                                                    pageAnnotations[index] = current.copy(
-                                                                        paths = current.paths.dropLast(1) + updatedPath
-                                                                    )
+                                                                if (annotationMode == AnnotationMode.ERASER) {
+                                                                    val pos = change.position
+                                                                    val filteredPaths = current.paths.filterNot { pathData ->
+                                                                        pathData.points.any { pt -> hypot(pt.x - pos.x, pt.y - pos.y) < 40f }
+                                                                    }
+                                                                    pageAnnotations[index] = current.copy(paths = filteredPaths)
+                                                                } else {
+                                                                    if (current.paths.isNotEmpty()) {
+                                                                        val lastPath = current.paths.last()
+                                                                        val updatedPath = lastPath.copy(
+                                                                            points = lastPath.points + change.position
+                                                                        )
+                                                                        pageAnnotations[index] = current.copy(
+                                                                            paths = current.paths.dropLast(1) + updatedPath
+                                                                        )
+                                                                    }
                                                                 }
                                                             }
                                                         )
@@ -421,8 +576,9 @@ fun ViewerScreen(
                                         // Render Text Stamps / Electronic Signatures
                                         for (stamp in activePageAnno.stamps) {
                                             Surface(
-                                                color = Color.White.copy(alpha = 0.9f),
+                                                color = Color.White.copy(alpha = 0.92f),
                                                 shape = RoundedCornerShape(8.dp),
+                                                shadowElevation = 2.dp,
                                                 modifier = Modifier
                                                     .padding(12.dp)
                                                     .align(Alignment.BottomEnd)
@@ -456,14 +612,14 @@ fun ViewerScreen(
     // Signature Pad Dialog
     if (showSignaturePad) {
         SignaturePadDialog(
-            onSignatureCaptured = { sigLabel ->
+            onSignatureCaptured = { sigLabel, sigColor ->
                 val activeIdx = 0
                 val current = pageAnnotations[activeIdx] ?: PageAnnotations(activeIdx)
                 val newStamp = TextStamp(
                     text = sigLabel,
                     xRatio = 0.6f,
                     yRatio = 0.85f,
-                    color = Color(0xFF6750A4),
+                    color = sigColor,
                     isSignature = true
                 )
                 pageAnnotations[activeIdx] = current.copy(
@@ -485,11 +641,11 @@ private fun shareFile(context: Context, file: File) {
             file
         )
         val intent = Intent(Intent.ACTION_SEND).apply {
-            type = "application/pdf"
+            type = if (file.extension.equals("pdf", true)) "application/pdf" else "image/*"
             putExtra(Intent.EXTRA_STREAM, uri)
             addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
         }
-        context.startActivity(Intent.createChooser(intent, "Share PDF Document"))
+        context.startActivity(Intent.createChooser(intent, "Share Document"))
     } catch (e: Exception) {
         e.printStackTrace()
     }

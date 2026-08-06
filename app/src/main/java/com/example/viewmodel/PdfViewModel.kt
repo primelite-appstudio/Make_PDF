@@ -123,6 +123,13 @@ class PdfViewModel(application: Application) : AndroidViewModel(application) {
     private val _syncStatusLog = MutableStateFlow<String?>(null)
     val syncStatusLog: StateFlow<String?> = _syncStatusLog.asStateFlow()
 
+    private val _isDarkMode = MutableStateFlow<Boolean?>(null) // null = follow system, true = dark, false = light
+    val isDarkMode: StateFlow<Boolean?> = _isDarkMode.asStateFlow()
+
+    fun toggleDarkMode(isDark: Boolean) {
+        _isDarkMode.value = isDark
+    }
+
     init {
         val dao = AppDatabase.getDatabase(application).documentDao()
         repository = DocumentRepository(dao)
@@ -176,6 +183,7 @@ class PdfViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun loadSampleTemplate(type: String) {
+        _lastExportedDocument.value = null
         when (type) {
             "Resume" -> {
                 _editorTitle.value = "Software_Engineer_Resume"
@@ -966,9 +974,7 @@ class PdfViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     private fun getExportDir(context: Context): File {
-        val dir = File(context.getExternalFilesDir(null), "ConvertedPDFs")
-        if (!dir.exists()) dir.mkdirs()
-        return dir
+        return PdfEngine.getPublicExportDir(context)
     }
 
     private fun formatFileSize(sizeInBytes: Long): String {

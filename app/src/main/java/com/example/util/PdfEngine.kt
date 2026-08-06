@@ -228,53 +228,27 @@ object PdfEngine {
         outputFile: File
     ): Int = withContext(Dispatchers.IO) {
         val pdfDocument = PdfDocument()
-        val pageWidth = if (options.isLandscape) A4_HEIGHT else A4_WIDTH
-        val pageHeight = if (options.isLandscape) A4_WIDTH else A4_HEIGHT
-        val margin = options.marginPt.coerceIn(0, 72)
-
-        val targetW = (pageWidth - 2 * margin).toFloat()
-        val targetH = (pageHeight - 2 * margin).toFloat()
-
         var pageIndex = 0
 
         for (uri in imageUris) {
             val bitmap = loadBitmapFromUri(context, uri) ?: continue
 
-            val pageInfo = PdfDocument.PageInfo.Builder(pageWidth, pageHeight, pageIndex + 1).create()
+            // Borderless image-to-PDF conversion: PDF page size matches image dimensions exactly
+            val imgWidth = bitmap.width
+            val imgHeight = bitmap.height
+
+            val pageInfo = PdfDocument.PageInfo.Builder(imgWidth, imgHeight, pageIndex + 1).create()
             val page = pdfDocument.startPage(pageInfo)
             val canvas = page.canvas
 
-            // Fill background
-            canvas.drawColor(parseColor(options.paperColorHex))
+            // Draw image filling 100% of the page with ZERO border, margins, or padding
+            val rect = RectF(0f, 0f, imgWidth.toFloat(), imgHeight.toFloat())
+            canvas.drawBitmap(bitmap, null, rect, Paint(Paint.FILTER_BITMAP_FLAG or Paint.ANTI_ALIAS_FLAG))
 
-            // Scale bitmap to fit target area
-            val scale = minOf(targetW / bitmap.width, targetH / bitmap.height)
-            val scaledWidth = bitmap.width * scale
-            val scaledHeight = bitmap.height * scale
-
-            val dx = margin + (targetW - scaledWidth) / 2f
-            val dy = margin + (targetH - scaledHeight) / 2f
-
-            val rect = RectF(dx, dy, dx + scaledWidth, dy + scaledHeight)
-            canvas.drawBitmap(bitmap, null, rect, Paint(Paint.FILTER_BITMAP_FLAG))
-
-            // Watermark if requested
+            // Watermark if explicitly requested
             if (options.watermarkText.isNotBlank()) {
-                drawWatermark(canvas, pageWidth, pageHeight, options.watermarkText, options.watermarkOpacity)
+                drawWatermark(canvas, imgWidth, imgHeight, options.watermarkText, options.watermarkOpacity)
             }
-
-            // Footer page number
-            val footerPaint = Paint().apply {
-                isAntiAlias = true
-                textSize = 10f
-                color = Color.DKGRAY
-            }
-            canvas.drawText(
-                "Page ${pageIndex + 1} of ${imageUris.size}",
-                (pageWidth - margin - 60).toFloat(),
-                (pageHeight - 15).toFloat(),
-                footerPaint
-            )
 
             pdfDocument.finishPage(page)
             bitmap.recycle()
@@ -283,11 +257,13 @@ object PdfEngine {
 
         if (pageIndex == 0) {
             // Fallback empty page if failed
-            val pageInfo = PdfDocument.PageInfo.Builder(pageWidth, pageHeight, 1).create()
+            val pageInfo = PdfDocument.PageInfo.Builder(595, 842, 1).create()
             val page = pdfDocument.startPage(pageInfo)
             pdfDocument.finishPage(page)
             pageIndex = 1
         }
+
+        scanMediaFile(context, outputFile)
 
         FileOutputStream(outputFile).use { out ->
             pdfDocument.writeTo(out)
@@ -515,8 +491,7 @@ object PdfEngine {
             targetPageIndices.filter { it in 0 until totalPdfPages }.sorted()
         }
 
-        val exportDir = File(context.getExternalFilesDir(null), "ConvertedPDFs")
-        if (!exportDir.exists()) exportDir.mkdirs()
+        val exportDir = getPublicExportDir(context)
 
         val timestamp = java.text.SimpleDateFormat("yyyyMMdd_HHmmss", java.util.Locale.getDefault()).format(java.util.Date())
         val cleanTitle = pdfFile.nameWithoutExtension.replace(" ", "_")
@@ -543,6 +518,7 @@ object PdfEngine {
             }
             bitmap.recycle()
 
+            scanMediaFile(context, imgFile)
             exportedFiles.add(imgFile)
         }
 
@@ -793,7 +769,40 @@ object PdfEngine {
         }
         pdfDocument.close()
 
+        scanMediaFile(context, outputFile)
         outputFile
+    }
+
+    fun getPublicExportDir(context: Context): File {
+        return try {
+            val downloadsDir = android.os.Environment.getExternalStoragePublicDirectory(android.os.Environment.DIRECTORY_DOWNLOADS)
+            val pdfDir = File(downloadsDir, "PDF_Converter_Suite")
+            if (!pdfDir.exists()) pdfDir.mkdirs()
+            if (pdfDir.exists() && pdfDir.canWrite()) {
+                pdfDir
+            } else {
+                val appDir = File(context.getExternalFilesDir(null), "ConvertedPDFs")
+                if (!appDir.exists()) appDir.mkdirs()
+                appDir
+            }
+        } catch (e: Exception) {
+            val appDir = File(context.getExternalFilesDir(null), "ConvertedPDFs")
+            if (!appDir.exists()) appDir.mkdirs()
+            appDir
+        }
+    }
+
+    fun scanMediaFile(context: Context, file: File) {
+        try {
+            android.media.MediaScannerConnection.scanFile(
+                context,
+                arrayOf(file.absolutePath),
+                null,
+                null
+            )
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
     }
 }
 

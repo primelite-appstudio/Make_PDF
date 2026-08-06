@@ -17,6 +17,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
@@ -28,11 +29,13 @@ import androidx.compose.material.icons.filled.ArrowForward
 import androidx.compose.material.icons.filled.Article
 import androidx.compose.material.icons.filled.CloudSync
 import androidx.compose.material.icons.filled.Compress
+import androidx.compose.material.icons.filled.DarkMode
 import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.Layers
+import androidx.compose.material.icons.filled.LightMode
 import androidx.compose.material.icons.filled.PictureAsPdf
 import androidx.compose.material.icons.filled.Receipt
 import androidx.compose.material.icons.filled.Reorder
@@ -87,6 +90,9 @@ fun HomeScreen(
     val activeMode by viewModel.currentMode.collectAsStateWithLifecycle()
     val webDavConfig by viewModel.webDavConfig.collectAsStateWithLifecycle()
     val localSyncConfig by viewModel.localSyncConfig.collectAsStateWithLifecycle()
+    val isDarkModeState by viewModel.isDarkMode.collectAsStateWithLifecycle()
+    val systemInDark = isSystemInDarkTheme()
+    val isDarkActive = isDarkModeState ?: systemInDark
     var showSyncSettings by remember { mutableStateOf(false) }
 
     Scaffold(
@@ -123,6 +129,15 @@ fun HomeScreen(
                     }
                 },
                 actions = {
+                    IconButton(
+                        onClick = { viewModel.toggleDarkMode(!isDarkActive) },
+                        modifier = Modifier.testTag("dark_mode_toggle_button")
+                    ) {
+                        Icon(
+                            imageVector = if (isDarkActive) Icons.Default.LightMode else Icons.Default.DarkMode,
+                            contentDescription = if (isDarkActive) "Switch to Light Mode" else "Switch to Dark Mode"
+                        )
+                    }
                     IconButton(
                         onClick = { showSyncSettings = true },
                         modifier = Modifier.testTag("sync_settings_top_icon")
@@ -573,9 +588,10 @@ fun TemplateChip(
     Surface(
         modifier = Modifier
             .clip(RoundedCornerShape(16.dp))
+            .border(1.dp, Color(0xFFD0BCFF), RoundedCornerShape(16.dp))
             .clickable { onClick() }
             .testTag(tag),
-        color = Color.White,
+        color = Color(0xFFF3EDF7),
         shape = RoundedCornerShape(16.dp)
     ) {
         Row(
@@ -585,14 +601,14 @@ fun TemplateChip(
             Icon(
                 imageVector = icon,
                 contentDescription = null,
-                tint = MaterialTheme.colorScheme.primary,
+                tint = Color(0xFF6750A4),
                 modifier = Modifier.size(18.dp)
             )
             Spacer(modifier = Modifier.width(8.dp))
             Text(
                 text = title,
-                style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.SemiBold),
-                color = MaterialTheme.colorScheme.onSurface
+                style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.Bold),
+                color = Color(0xFF1C1B1F)
             )
         }
     }

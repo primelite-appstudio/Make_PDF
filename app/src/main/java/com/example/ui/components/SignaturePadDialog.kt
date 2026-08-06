@@ -3,6 +3,7 @@ package com.example.ui.components
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -12,7 +13,9 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Check
@@ -34,6 +37,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
@@ -43,15 +47,22 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
-import com.example.data.model.DrawingPath
 
 @Composable
 fun SignaturePadDialog(
-    onSignatureCaptured: (signatureName: String) -> Unit,
+    onSignatureCaptured: (signatureName: String, color: Color) -> Unit,
     onDismiss: () -> Unit
 ) {
     val currentPoints = remember { mutableStateListOf<Offset>() }
-    var signatureText by remember { mutableStateOf("Signed E-Signature") }
+    var selectedColor by remember { mutableStateOf(Color(0xFF1D1B20)) } // Default Black/Dark
+
+    val signatureColors = listOf(
+        Color(0xFF1D1B20) to "Black",
+        Color(0xFF0D47A1) to "Royal Blue",
+        Color(0xFFB71C1C) to "Dark Red",
+        Color(0xFF1B5E20) to "Emerald Green",
+        Color(0xFF4A148C) to "Purple"
+    )
 
     Dialog(onDismissRequest = onDismiss) {
         Card(
@@ -80,10 +91,43 @@ fun SignaturePadDialog(
                 }
 
                 Text(
-                    text = "Draw your signature below using your finger or stylus:",
+                    text = "Select Ink Color & Sign below:",
                     style = MaterialTheme.typography.bodySmall,
                     color = Color(0xFF49454F)
                 )
+
+                // Color selector for signature
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    signatureColors.forEach { (color, label) ->
+                        val isSelected = selectedColor == color
+                        Box(
+                            modifier = Modifier
+                                .size(32.dp)
+                                .clip(CircleShape)
+                                .background(color)
+                                .border(
+                                    width = if (isSelected) 3.dp else 1.dp,
+                                    color = if (isSelected) Color(0xFF6750A4) else Color.LightGray,
+                                    shape = CircleShape
+                                )
+                                .clickable { selectedColor = color },
+                            contentAlignment = Alignment.Center
+                        ) {
+                            if (isSelected) {
+                                Icon(
+                                    imageVector = Icons.Default.Check,
+                                    contentDescription = label,
+                                    tint = Color.White,
+                                    modifier = Modifier.size(16.dp)
+                                )
+                            }
+                        }
+                    }
+                }
 
                 // Signature Canvas Pad
                 Box(
@@ -113,7 +157,7 @@ fun SignaturePadDialog(
                             }
                             drawPath(
                                 path = path,
-                                color = Color(0xFF1D1B20),
+                                color = selectedColor,
                                 style = Stroke(width = 6f)
                             )
                         }
@@ -148,7 +192,7 @@ fun SignaturePadDialog(
                     Button(
                         onClick = {
                             val label = if (currentPoints.isNotEmpty()) "Electronic Signature ✓" else "Approved Stamp"
-                            onSignatureCaptured(label)
+                            onSignatureCaptured(label, selectedColor)
                             onDismiss()
                         },
                         modifier = Modifier
